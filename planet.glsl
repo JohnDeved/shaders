@@ -1,8 +1,13 @@
 const float PLANET_RADIUS = 1.0;
 const float MAX_HEIGHT = 0.15;
+const float WATER_LEVEL = 0.05; // Increased from 0.02
 const int MARCH_STEPS = 64*4;
 const float MARCH_PRECISION = 0.001;
 const vec3 atmColor = vec3(0.4, 0.6, 1.0);
+const vec3 waterShallowColor = vec3(0.1, 0.5, 0.8);    // Brighter shallow water
+const vec3 waterColor = vec3(0.1, 0.35, 0.6);          // Mid-depth water
+const vec3 waterDeepColor = vec3(0.02, 0.1, 0.3);      // Darker deep water
+const vec3 beachColor = vec3(0.76, 0.7, 0.5);
 
 float hash(vec3 p) {
     p = fract(p * vec3(443.8975));
@@ -54,7 +59,7 @@ float ridgeNoise(vec3 p) {
     n = abs(n);
     n = 1.0 - n;
     // Soften the ridge effect
-    return n * n * (5.0 - 2.0 * n);
+    return n * n * (3.0 - 2.0 * n);
 }
 
 float erosion(vec3 p) {
@@ -65,7 +70,7 @@ float erosion(vec3 p) {
 float smoothTerrain(float h) {
     // Smooth transition between flat and varied terrain
     float flatness = smoothstep(0.2, 0.4, h) * (1.0 - smoothstep(0.6, 0.8, h));
-    return mix(h, h * (1.0 - flatness * 0.5), 1.0);
+    return mix(h, h * (1.0 - flatness * 0.5), 1.15);
 }
 
 float fbm(vec3 p) {
@@ -101,8 +106,20 @@ float getHeight(vec3 p) {
     return fbm(normalize(p) * 3.0) * MAX_HEIGHT;
 }
 
+float getWaterHeight(vec3 p) {
+    float time = iTime * 0.5;
+    float wave = sin(dot(p, vec3(1.0)) * 20.0 + time) * 0.5 +
+                 sin(dot(p, vec3(-0.5, 0.3, 0.7)) * 15.0 + time * 1.2) * 0.5;
+    return WATER_LEVEL + wave * 0.003;
+}
+
 float getSurfaceDistance(vec3 p) {
-    return length(p) - (PLANET_RADIUS + getHeight(p));
+    float dist = length(p);
+    float terrain = dist - (PLANET_RADIUS + getHeight(p));
+    float water = dist - (PLANET_RADIUS + WATER_LEVEL);
+    
+    // Use separate distances for water and terrain
+    return (water < terrain) ? water : terrain;
 }
 
 vec3 calcNormal(vec3 p) {
@@ -127,8 +144,15 @@ vec3 getTerrainColor(vec3 pos, float height, vec3 normal) {
     float heightFactor = height / MAX_HEIGHT;
     vec3 baseColor;
     
+    // Beach zone
+    float beachZone = 0.01; // Width of beach
+    if (height < WATER_LEVEL + beachZone && height > WATER_LEVEL) {
+        float beachBlend = smoothstep(WATER_LEVEL, WATER_LEVEL + beachZone, height);
+        return mix(beachColor, lowColor, beachBlend);
+    }
+    
+    // Rest of terrain coloring
     if (heightFactor > 0.75) {
-        // Mountain peaks (top 25%)
         float t = smoothstep(0.75, 1.0, heightFactor);
         baseColor = mix(highColor, peakColor, t);
     } else if (heightFactor > 0.5) {
@@ -178,12 +202,53 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         
         if(d < MARCH_PRECISION) {
             vec3 normal = calcNormal(p);
-            float height = getHeight(p);
+            float dist = length(p);
+            float terrain_height = getHeight(p);
+            float surface_height = dist - PLANET_RADIUS;
             
             vec3 lightDir = normalize(vec3(1.0, 0.5, -0.5));
             float diff = max(dot(normal, lightDir), 0.0);
             
-            col = getTerrainColor(p, height, normal) * (diff + 0.3);
+            vec3 baseColor;
+            // Explicitly check if we hit water surface
+            if (surface_height < WATER_LEVEL + 0.001) {
+                // Water rendering
+                float fresnel = pow(1.0 - max(dot(-rd, normal), 0.0), 4.0);
+                float wave = sin(dot(p, vec3(1.0, 0.0, 1.0)) * 50.0 + iTime) * 0.02;
+                
+                // Enhanced depth calculation
+                float depth = WATER_LEVEL - terrain_height;
+                float normalizedDepth = smoothstep(0.0, 0.01, depth);
+                
+                // Three-way color mix based on depth
+                baseColor = mix(
+                    waterShallowColor,
+                    waterColor,
+                    smoothstep(0.0, 0.03, depth)
+                );
+                baseColor = mix(
+                    baseColor,
+                    waterDeepColor,
+                    smoothstep(0.03, 0.08, depth)
+                );
+                
+                // Enhance deep water darkness
+                baseColor *= mix(1.0, 0.5, normalizedDepth);
+                
+                // Add fresnel effect
+                baseColor = mix(baseColor, vec3(1.0), fresnel * 0.3);
+                // Add waves
+                baseColor += wave * mix(0.1, 0.02, normalizedDepth);
+                
+                // Enhance specular for shallow water
+                vec3 reflDir = reflect(-lightDir, normal);
+                float spec = pow(max(dot(reflDir, -rd), 0.0), 32.0);
+                baseColor += vec3(spec) * mix(0.6, 0.2, normalizedDepth);
+            } else {
+                baseColor = getTerrainColor(p, terrain_height, normal);
+            }
+            
+            col = baseColor * (diff + 0.3);
             col += atmColor * pow(1.0 - max(dot(-rd, normal), 0.0), 2.0) * 0.4;
             break;
         }
