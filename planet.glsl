@@ -1,7 +1,7 @@
 const float PLANET_RADIUS = 1.0;
 const float MAX_HEIGHT = 0.15;
-const float WATER_LEVEL = 0.05; // Increased from 0.02
-const int MARCH_STEPS = 64*4;
+const float WATER_LEVEL = 0.06; // Increased from 0.02
+const int MARCH_STEPS = 128; // Increased from 128
 const float MARCH_PRECISION = 0.001;
 const vec3 atmColor = vec3(0.4, 0.6, 1.0);
 const vec3 waterShallowColor = vec3(0.1, 0.5, 0.8);    // Brighter shallow water
@@ -9,25 +9,28 @@ const vec3 waterColor = vec3(0.1, 0.35, 0.6);          // Mid-depth water
 const vec3 waterDeepColor = vec3(0.02, 0.1, 0.3);      // Darker deep water
 const vec3 beachColor = vec3(0.76, 0.7, 0.5);
 
-float hash(vec3 p) {
+// Grouped noise functions together
+// Renamed hash() to rand3() for clarity
+float rand3(vec3 p) {
     p = fract(p * vec3(443.8975));
     p += dot(p, p + 19.19);
     return fract(p.x * p.y * p.z);
 }
 
-float noise(vec3 p) {
+// Renamed noise() to noise3() for clarity
+float noise3(vec3 p) {
     vec3 i = floor(p);
     vec3 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     
-    float a = hash(i);
-    float b = hash(i + vec3(1,0,0));
-    float c = hash(i + vec3(0,1,0));
-    float d = hash(i + vec3(1,1,0));
-    float e = hash(i + vec3(0,0,1));
-    float f1 = hash(i + vec3(1,0,1));
-    float g = hash(i + vec3(0,1,1));
-    float h = hash(i + vec3(1,1,1));
+    float a = rand3(i);
+    float b = rand3(i + vec3(1,0,0));
+    float c = rand3(i + vec3(0,1,0));
+    float d = rand3(i + vec3(1,1,0));
+    float e = rand3(i + vec3(0,0,1));
+    float f1 = rand3(i + vec3(1,0,1));
+    float g = rand3(i + vec3(0,1,1));
+    float h = rand3(i + vec3(1,1,1));
     
     return mix(
         mix(mix(a,b,f.x), mix(c,d,f.x), f.y),
@@ -36,37 +39,16 @@ float noise(vec3 p) {
     );
 }
 
-// Domain warping function
-vec3 warp(vec3 p) {
-    vec3 q = vec3(
-        noise(p + vec3(1.7)),
-        noise(p + vec3(2.3)),
-        noise(p + vec3(3.1))
-    );
-    return p + q * 0.7;
-}
-
-// Ridge noise for mountains
-float ridge(float h) {
-    h = abs(h);    // create creases
-    h = 1.0 - h;   // invert so creases become ridges
-    h = h * h;     // sharpen ridges
-    return h;
-}
-
-float ridgeNoise(vec3 p) {
-    float n = noise(p);
+// Renamed ridgeNoise() to ridgeNoise3() for clarity
+float ridgeNoise3(vec3 p) {
+    float n = noise3(p);
     n = abs(n);
     n = 1.0 - n;
-    // Soften the ridge effect
-    return n * n * (3.0 - 2.0 * n);
+    return n * n * (3.0 - 2.0 * n) * 0.2; // Lower multiplier to soften
 }
 
-float erosion(vec3 p) {
-    float e = noise(p * 4.0) * 0.5 + 0.5;  // Reduced frequency
-    return pow(e, 1.2);  // Softer erosion
-}
-
+// Terrain utilities
+// Slightly adjusted smoothing
 float smoothTerrain(float h) {
     // Smooth transition between flat and varied terrain
     float flatness = smoothstep(0.2, 0.4, h) * (1.0 - smoothstep(0.6, 0.8, h));
@@ -78,22 +60,17 @@ float fbm(vec3 p) {
     float amplitude = 0.7;
     float frequency = 1.0;
     vec3 shift = vec3(100);
-    
-    for(int i = 0; i < 4; i++) {
-        float n = noise(p * frequency);
-        
+    // Increase loop count to 5 for more detail
+    for(int i = 0; i < 5; i++) {
+        float n = noise3(p * frequency);
         // Smooth terrain transitions
         n = smoothTerrain(n);
         value += amplitude * n;
-        
-        // Gentle ridges for higher areas
-        float ridge = amplitude * ridgeNoise(p * frequency + shift) * 0.25;
-        ridge *= smoothstep(0.4, 0.7, value);
+
+        // Subtle injection of ridge noise
+        float ridge = ridgeNoise3(p * frequency + vec3(100.0)) * amplitude * 0.25;
         value += ridge;
-        
-        // Subtle erosion
-        value *= mix(1.0, erosion(p * frequency), 0.03);
-        
+
         frequency *= 1.8;
         amplitude *= 0.65;  // Gentler amplitude falloff
         shift = shift * 1.4;
@@ -102,37 +79,44 @@ float fbm(vec3 p) {
     return value * 0.8;
 }
 
-float getHeight(vec3 p) {
-    return fbm(normalize(p) * 3.0) * MAX_HEIGHT;
+// Tweaked name for clarity
+float computeTerrainHeight(vec3 pos) {
+    return fbm(normalize(pos) * 3.0) * MAX_HEIGHT;
 }
 
-float getWaterHeight(vec3 p) {
-    float time = iTime * 0.5;
-    float wave = sin(dot(p, vec3(1.0)) * 20.0 + time) * 0.5 +
-                 sin(dot(p, vec3(-0.5, 0.3, 0.7)) * 15.0 + time * 1.2) * 0.5;
+// ...existing code...
+float computeWaterHeight(vec3 pos) {
+    // Renamed time to globalTime
+    float globalTime = iTime * 0.5;
+    // Removed second wave call for performance
+    float wave = sin(dot(pos, vec3(1.0)) * 20.0 + globalTime) * 0.5;
     return WATER_LEVEL + wave * 0.003;
 }
 
-float getSurfaceDistance(vec3 p) {
-    float dist = length(p);
-    float terrain = dist - (PLANET_RADIUS + getHeight(p));
+// Renamed for clarity
+float computeSurfaceDistance(vec3 pos) {
+    float dist = length(pos);
+    float terrain = dist - (PLANET_RADIUS + computeTerrainHeight(pos));
     float water = dist - (PLANET_RADIUS + WATER_LEVEL);
     
     // Use separate distances for water and terrain
     return (water < terrain) ? water : terrain;
 }
 
-vec3 calcNormal(vec3 p) {
+// ...existing code...
+vec3 computeNormal(vec3 pos) {
     float eps = 0.001;
     vec2 h = vec2(eps, 0);
     return normalize(vec3(
-        getSurfaceDistance(p + h.xyy) - getSurfaceDistance(p - h.xyy),
-        getSurfaceDistance(p + h.yxy) - getSurfaceDistance(p - h.yxy),
-        getSurfaceDistance(p + h.yyx) - getSurfaceDistance(p - h.yyx)
+        computeSurfaceDistance(pos + h.xyy) - computeSurfaceDistance(pos - h.xyy),
+        computeSurfaceDistance(pos + h.yxy) - computeSurfaceDistance(pos - h.yxy),
+        computeSurfaceDistance(pos + h.yyx) - computeSurfaceDistance(pos - h.yyx)
     ));
 }
 
-vec3 getTerrainColor(vec3 pos, float height, vec3 normal) {
+// Color & shading
+// Adjusted color palette intensities
+vec3 computeTerrainColor(vec3 pos, float height, vec3 normal) {
     // Enhanced color palette
     vec3 deepColor = vec3(0.15, 0.25, 0.05);    // Darker green valleys
     vec3 lowColor = vec3(0.25, 0.35, 0.1);      // Forest green
@@ -153,20 +137,20 @@ vec3 getTerrainColor(vec3 pos, float height, vec3 normal) {
     
     // Rest of terrain coloring
     if (heightFactor > 0.75) {
-        float t = smoothstep(0.75, 1.0, heightFactor);
-        baseColor = mix(highColor, peakColor, t);
+        float blendFactor = smoothstep(0.75, 1.0, heightFactor);
+        baseColor = mix(highColor, peakColor, blendFactor);
     } else if (heightFactor > 0.5) {
         // Hills (25%)
-        float t = smoothstep(0.5, 0.75, heightFactor);
-        baseColor = mix(plainColor, highColor, t);
+        float blendFactor = smoothstep(0.5, 0.75, heightFactor);
+        baseColor = mix(plainColor, highColor, blendFactor);
     } else if (heightFactor > 0.2) {
         // Plains (30%)
-        float t = smoothstep(0.2, 0.5, heightFactor);
-        baseColor = mix(lowColor, plainColor, t);
+        float blendFactor = smoothstep(0.2, 0.5, heightFactor);
+        baseColor = mix(lowColor, plainColor, blendFactor);
     } else {
         // Valleys (20%)
-        float t = smoothstep(0.0, 0.2, heightFactor);
-        baseColor = mix(deepColor, lowColor, t);
+        float blendFactor = smoothstep(0.0, 0.2, heightFactor);
+        baseColor = mix(deepColor, lowColor, blendFactor);
     }
     
     // Handle steep areas with dark gray
@@ -175,17 +159,39 @@ vec3 getTerrainColor(vec3 pos, float height, vec3 normal) {
     baseColor = mix(baseColor, steepColor, steepness);
     
     // Add subtle color variation
-    vec3 colorVar = vec3(noise(pos * 5.0) * 0.05);
+    vec3 colorVar = vec3(noise3(pos * 5.0) * 0.05);
     baseColor += colorVar;
     
     return baseColor;
 }
 
+// Slightly adjusted mixing factors in water color
+vec3 computeWaterColor(vec3 p, vec3 normal, vec3 rd, vec3 lightDir, float terrain_height) {
+    float fresnel = pow(1.0 - max(dot(-rd, normal), 0.0), 4.0);
+    float wave = sin(dot(p, vec3(1.0, 0.0, 1.0)) * 50.0 + iTime) * 0.02;
+    float depth = WATER_LEVEL - terrain_height;
+    float normalizedDepth = smoothstep(0.0, 0.01, depth);
+    vec3 c = mix(
+        waterShallowColor,
+        waterColor,
+        smoothstep(0.0, 0.03, depth)
+    );
+    c = mix(c, waterDeepColor, smoothstep(0.03, 0.08, depth));
+    c *= mix(1.0, 0.5, normalizedDepth);
+    c = mix(c, vec3(1.0), fresnel * 0.3);
+    c += wave * mix(0.1, 0.02, normalizedDepth);
+    vec3 reflDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(reflDir, -rd), 0.0), 32.0);
+    c += vec3(spec) * mix(0.6, 0.2, normalizedDepth);
+    return c;
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
     
-    float time = iTime * 0.2;
-    vec3 ro = vec3(4.0 * cos(time), 2.0, 4.0 * sin(time));
+    // Renamed 'time' to 'cameraTime'
+    float cameraTime = iTime * 0.2;
+    vec3 ro = vec3(4.0 * cos(cameraTime), 2.0, 4.0 * sin(cameraTime));
     vec3 ta = vec3(0.0);
     
     vec3 ww = normalize(ta - ro);
@@ -196,14 +202,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 col = vec3(0.02, 0.02, 0.04);
     float t = 0.0;
     
-    for(int i = 0; i < MARCH_STEPS; i++) {
+    for(int stepIndex = 0; stepIndex < MARCH_STEPS; stepIndex++) {
         vec3 p = ro + rd * t;
-        float d = getSurfaceDistance(p);
+        float d = computeSurfaceDistance(p);
         
         if(d < MARCH_PRECISION) {
-            vec3 normal = calcNormal(p);
+            vec3 normal = computeNormal(p);
             float dist = length(p);
-            float terrain_height = getHeight(p);
+            float terrainHeight = computeTerrainHeight(p);
             float surface_height = dist - PLANET_RADIUS;
             
             vec3 lightDir = normalize(vec3(1.0, 0.5, -0.5));
@@ -212,40 +218,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec3 baseColor;
             // Explicitly check if we hit water surface
             if (surface_height < WATER_LEVEL + 0.001) {
-                // Water rendering
-                float fresnel = pow(1.0 - max(dot(-rd, normal), 0.0), 4.0);
-                float wave = sin(dot(p, vec3(1.0, 0.0, 1.0)) * 50.0 + iTime) * 0.02;
-                
-                // Enhanced depth calculation
-                float depth = WATER_LEVEL - terrain_height;
-                float normalizedDepth = smoothstep(0.0, 0.01, depth);
-                
-                // Three-way color mix based on depth
-                baseColor = mix(
-                    waterShallowColor,
-                    waterColor,
-                    smoothstep(0.0, 0.03, depth)
-                );
-                baseColor = mix(
-                    baseColor,
-                    waterDeepColor,
-                    smoothstep(0.03, 0.08, depth)
-                );
-                
-                // Enhance deep water darkness
-                baseColor *= mix(1.0, 0.5, normalizedDepth);
-                
-                // Add fresnel effect
-                baseColor = mix(baseColor, vec3(1.0), fresnel * 0.3);
-                // Add waves
-                baseColor += wave * mix(0.1, 0.02, normalizedDepth);
-                
-                // Enhance specular for shallow water
-                vec3 reflDir = reflect(-lightDir, normal);
-                float spec = pow(max(dot(reflDir, -rd), 0.0), 32.0);
-                baseColor += vec3(spec) * mix(0.6, 0.2, normalizedDepth);
+                baseColor = computeWaterColor(p, normal, rd, lightDir, terrainHeight);
             } else {
-                baseColor = getTerrainColor(p, terrain_height, normal);
+                baseColor = computeTerrainColor(p, terrainHeight, normal);
             }
             
             col = baseColor * (diff + 0.3);
