@@ -1,6 +1,6 @@
 const float PLANET_RADIUS = 1.0;
 const float MAX_HEIGHT = 0.15;
-const int MARCH_STEPS = 64;
+const int MARCH_STEPS = 64*4;
 const float MARCH_PRECISION = 0.001;
 const vec3 atmColor = vec3(0.4, 0.6, 1.0);
 
@@ -49,20 +49,12 @@ float ridge(float h) {
     return h;
 }
 
-// Crater function
-float crater(vec3 p) {
-    float d = length(p.xz);
-    float crater = 1.0 - smoothstep(0.0, 0.4, d);
-    crater *= smoothstep(0.0, 0.1, d);
-    return crater;
-}
-
 float ridgeNoise(vec3 p) {
     float n = noise(p);
     n = abs(n);
     n = 1.0 - n;
     // Soften the ridge effect
-    return n * n * (3.0 - 2.0 * n);
+    return n * n * (5.0 - 2.0 * n);
 }
 
 float erosion(vec3 p) {
@@ -73,7 +65,7 @@ float erosion(vec3 p) {
 float smoothTerrain(float h) {
     // Smooth transition between flat and varied terrain
     float flatness = smoothstep(0.2, 0.4, h) * (1.0 - smoothstep(0.6, 0.8, h));
-    return mix(h, h * (1.0 - flatness * 0.5), 0.6);
+    return mix(h, h * (1.0 - flatness * 0.5), 1.0);
 }
 
 float fbm(vec3 p) {
@@ -101,11 +93,6 @@ float fbm(vec3 p) {
         amplitude *= 0.65;  // Gentler amplitude falloff
         shift = shift * 1.4;
     }
-    
-    // Minimal crater impact
-    float c = crater(p * 1.5 + vec3(1.0, 0.0, 1.0)) * 0.04;
-    c += crater(p * 2.0 + vec3(-2.0, 0.0, -1.0)) * 0.02;
-    value -= c;
     
     return value * 0.8;
 }
