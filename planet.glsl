@@ -1,13 +1,23 @@
 const float PLANET_RADIUS = 1.0;
 const float MAX_HEIGHT = 0.15;
-const float WATER_LEVEL = 0.06; // Increased from 0.02
-const int MARCH_STEPS = 128; // Increased from 128
+const float WATER_LEVEL = 0.05; // Increased from 0.02
+const int MARCH_STEPS = 150; // Increased from 128
 const float MARCH_PRECISION = 0.001;
 const vec3 atmColor = vec3(0.4, 0.6, 1.0);
 const vec3 waterShallowColor = vec3(0.1, 0.5, 0.8);    // Brighter shallow water
 const vec3 waterColor = vec3(0.1, 0.35, 0.6);          // Mid-depth water
 const vec3 waterDeepColor = vec3(0.02, 0.1, 0.3);      // Darker deep water
 const vec3 beachColor = vec3(0.76, 0.7, 0.5);
+
+// Add these constants near the top with other constants
+const float MIN_ZOOM = 1.2;    // Closest distance allowed
+const float MAX_ZOOM = 6.0;   // Furthest distance allowed
+const float MAX_CAM_TILT = 0.5; // Maximum camera tilt factor (0.0 - 1.0)
+
+// Add this with other constants at the top
+const float BASE_FOV = 1.5;    // Original FOV multiplier
+const float MIN_FOV = 0.8;     // Narrower FOV when zoomed in
+const float MAX_FOV = 1.5;     // Wide FOV when zoomed out
 
 // Grouped noise functions together
 // Renamed hash() to rand3() for clarity
@@ -85,10 +95,12 @@ float computeTerrainHeight(vec3 pos) {
 }
 
 // ...existing code...
-
-// Simplified water height - removed wave calculation
 float computeWaterHeight(vec3 pos) {
-    return WATER_LEVEL;
+    // Renamed time to globalTime
+    float globalTime = iTime * 0.5;
+    // Removed second wave call for performance
+    float wave = sin(dot(pos, vec3(1.0)) * 20.0 + globalTime) * 0.5;
+    return WATER_LEVEL + wave * 0.003;
 }
 
 // Renamed for clarity
@@ -164,9 +176,9 @@ vec3 computeTerrainColor(vec3 pos, float height, vec3 normal) {
 }
 
 // Slightly adjusted mixing factors in water color
-// Simplified water color - removed wave effects
 vec3 computeWaterColor(vec3 p, vec3 normal, vec3 rd, vec3 lightDir, float terrain_height) {
     float fresnel = pow(1.0 - max(dot(-rd, normal), 0.0), 4.0);
+    float wave = sin(dot(p, vec3(1.0, 0.0, 1.0)) * 50.0 + iTime) * 0.02;
     float depth = WATER_LEVEL - terrain_height;
     float normalizedDepth = smoothstep(0.0, 0.01, depth);
     vec3 c = mix(
@@ -177,24 +189,47 @@ vec3 computeWaterColor(vec3 p, vec3 normal, vec3 rd, vec3 lightDir, float terrai
     c = mix(c, waterDeepColor, smoothstep(0.03, 0.08, depth));
     c *= mix(1.0, 0.5, normalizedDepth);
     c = mix(c, vec3(1.0), fresnel * 0.3);
+    c += wave * mix(0.1, 0.02, normalizedDepth);
     vec3 reflDir = reflect(-lightDir, normal);
     float spec = pow(max(dot(reflDir, -rd), 0.0), 32.0);
     c += vec3(spec) * mix(0.6, 0.2, normalizedDepth);
     return c;
 }
 
+// ...existing code...
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
     
-    // Renamed 'time' to 'cameraTime'
     float cameraTime = iTime * 0.2;
-    vec3 ro = vec3(4.0 * cos(cameraTime), 2.0, 4.0 * sin(cameraTime));
-    vec3 ta = vec3(0.0);
+    
+    // Start at maximum zoom by default
+    float zoom = MAX_ZOOM;
+    if (iMouse.z > 0.0) {  // If mouse button is pressed
+        float mouseY = iMouse.y / iResolution.y;  // Normalize to 0-1
+        zoom = mix(MAX_ZOOM, MIN_ZOOM, mouseY);   // Map Y position to zoom range
+    }
+    
+    // Calculate tilt factor based on zoom
+    float tiltFactor = smoothstep(MAX_ZOOM, MIN_ZOOM, zoom) * MAX_CAM_TILT; // Max 0.7 up-tilt
+    
+    // Apply zoom and tilt to camera position
+    vec3 ro = vec3(
+        zoom * cos(cameraTime),
+        zoom * 0.5 * (1.0 - tiltFactor), // Reduce vertical component when close
+        zoom * sin(cameraTime)
+    );
+    
+    // Adjust look-at point based on tilt
+    vec3 ta = vec3(0.0, tiltFactor * 2.0, 0.0); // Look up more when close
     
     vec3 ww = normalize(ta - ro);
     vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
     vec3 vv = normalize(cross(uu, ww));
-    vec3 rd = normalize(uv.x * uu + uv.y * vv + 1.5 * ww);
+    
+    // Adjust FOV based on zoom level
+    float fov = mix(MIN_FOV, MAX_FOV, smoothstep(MIN_ZOOM, MAX_ZOOM, zoom));
+    vec3 rd = normalize(uv.x * uu + uv.y * vv + fov * ww);
     
     vec3 col = vec3(0.02, 0.02, 0.04);
     float t = 0.0;
