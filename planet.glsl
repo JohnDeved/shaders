@@ -129,17 +129,43 @@ vec3 calcNormal(vec3 p) {
 }
 
 vec3 getTerrainColor(vec3 pos, float height, vec3 normal) {
-    // Basic colors
-    vec3 lowColor = vec3(0.2, 0.3, 0.1);
-    vec3 highColor = vec3(0.8);
-    vec3 rockColor = vec3(0.4, 0.3, 0.2);
+    // Enhanced color palette
+    vec3 deepColor = vec3(0.15, 0.25, 0.05);    // Darker green valleys
+    vec3 lowColor = vec3(0.25, 0.35, 0.1);      // Forest green
+    vec3 plainColor = vec3(0.35, 0.42, 0.15);   // Grass green
+    vec3 highColor = vec3(0.45, 0.42, 0.25);    // Yellow-green hills
+    vec3 peakColor = vec3(0.8);                 // Gray peaks
+    vec3 steepColor = vec3(0.25);              // Dark gray for cliffs
     
-    // Height-based coloring
-    vec3 baseColor = mix(lowColor, highColor, smoothstep(0.0, MAX_HEIGHT, height));
+    float heightFactor = height / MAX_HEIGHT;
+    vec3 baseColor;
     
-    // Add rocky areas on slopes
+    if (heightFactor > 0.75) {
+        // Mountain peaks (top 25%)
+        float t = smoothstep(0.75, 1.0, heightFactor);
+        baseColor = mix(highColor, peakColor, t);
+    } else if (heightFactor > 0.5) {
+        // Hills (25%)
+        float t = smoothstep(0.5, 0.75, heightFactor);
+        baseColor = mix(plainColor, highColor, t);
+    } else if (heightFactor > 0.2) {
+        // Plains (30%)
+        float t = smoothstep(0.2, 0.5, heightFactor);
+        baseColor = mix(lowColor, plainColor, t);
+    } else {
+        // Valleys (20%)
+        float t = smoothstep(0.0, 0.2, heightFactor);
+        baseColor = mix(deepColor, lowColor, t);
+    }
+    
+    // Handle steep areas with dark gray
     float slope = 1.0 - dot(normal, normalize(pos));
-    baseColor = mix(baseColor, rockColor, smoothstep(0.6, 0.8, slope));
+    float steepness = smoothstep(0.5, 0.7, slope);
+    baseColor = mix(baseColor, steepColor, steepness);
+    
+    // Add subtle color variation
+    vec3 colorVar = vec3(noise(pos * 5.0) * 0.05);
+    baseColor += colorVar;
     
     return baseColor;
 }
