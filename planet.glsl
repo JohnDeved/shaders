@@ -85,12 +85,10 @@ float computeTerrainHeight(vec3 pos) {
 }
 
 // ...existing code...
+
+// Simplified water height - removed wave calculation
 float computeWaterHeight(vec3 pos) {
-    // Renamed time to globalTime
-    float globalTime = iTime * 0.5;
-    // Removed second wave call for performance
-    float wave = sin(dot(pos, vec3(1.0)) * 20.0 + globalTime) * 0.5;
-    return WATER_LEVEL + wave * 0.003;
+    return WATER_LEVEL;
 }
 
 // Renamed for clarity
@@ -166,9 +164,9 @@ vec3 computeTerrainColor(vec3 pos, float height, vec3 normal) {
 }
 
 // Slightly adjusted mixing factors in water color
+// Simplified water color - removed wave effects
 vec3 computeWaterColor(vec3 p, vec3 normal, vec3 rd, vec3 lightDir, float terrain_height) {
     float fresnel = pow(1.0 - max(dot(-rd, normal), 0.0), 4.0);
-    float wave = sin(dot(p, vec3(1.0, 0.0, 1.0)) * 50.0 + iTime) * 0.02;
     float depth = WATER_LEVEL - terrain_height;
     float normalizedDepth = smoothstep(0.0, 0.01, depth);
     vec3 c = mix(
@@ -179,7 +177,6 @@ vec3 computeWaterColor(vec3 p, vec3 normal, vec3 rd, vec3 lightDir, float terrai
     c = mix(c, waterDeepColor, smoothstep(0.03, 0.08, depth));
     c *= mix(1.0, 0.5, normalizedDepth);
     c = mix(c, vec3(1.0), fresnel * 0.3);
-    c += wave * mix(0.1, 0.02, normalizedDepth);
     vec3 reflDir = reflect(-lightDir, normal);
     float spec = pow(max(dot(reflDir, -rd), 0.0), 32.0);
     c += vec3(spec) * mix(0.6, 0.2, normalizedDepth);
